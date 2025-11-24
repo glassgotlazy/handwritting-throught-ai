@@ -1,4 +1,3 @@
-# main.py (patched)
 import streamlit as st
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
@@ -18,20 +17,24 @@ try:
     from matplotlib import rcParams
     import numpy as np
     MATPLOTLIB_AVAILABLE = True
+    # Use LaTeX-like mathtext via mathtext renderer
     rcParams["mathtext.fontset"] = "dejavusans"
 except Exception:
     MATPLOTLIB_AVAILABLE = False
 
+# Initialize OpenAI client with Streamlit secrets
 client = OpenAI(api_key=st.secrets.get("OPENAI_API_KEY"))
 
-# --- Caches to improve performance and consistency ---
-_char_image_cache = {}
-_math_image_cache = {}
-
 def generate_assignment_answer(question: str, pages: int = 2) -> str:
+    """
+    Generate an exam-style answer while preserving math in LaTeX.
+    Ask the model to keep math in $...$ or $$...$$ and not modify it.
+    """
     approx_words_per_page = 180
     target_words = pages * approx_words_per_page
-    prompt = f"""You are an Indian first-year LLB student.
+
+    prompt = f"""
+You are an Indian first-year LLB student.
 Write an exam-style answer to the following question.
 
 Question: {question}
@@ -41,8 +44,9 @@ Constraints:
 - Simple vocabulary.
 - Clear headings and short paragraphs.
 - No bullet points, just paragraphs.
-- IMPORTANT: If you need to include any mathematical formula or expression, please use LaTeX math delimiters: inline math with $...$ or display math with $$...$$. Do NOT wrap math in markdown code fences. Keep the answer plain text with math kept exactly between $ or $$ so it can be correctly rendered later.
+- IMPORTANT: If you need to include any mathematical formula or expression, please use LaTeX math delimiters: inline math with $...$ or display math with $$...$$. Do NOT wrap math in markdown code fences. Do not include any other markup. Keep the answer plain text with math kept exactly between $ or $$ so it can be correctly rendered later.
 """
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -56,9 +60,13 @@ Constraints:
         return ""
 
 def load_font_from_path(font_path: Union[str, Path, None], font_size: int):
+    """
+    Try to load a TTF/OTF font from disk. If it fails, return PIL's default font.
+    """
     if font_path is None:
         st.warning("No font path provided — using default font.")
         return ImageFont.load_default()
+
     try:
         return ImageFont.truetype(str(font_path), font_size)
     except OSError as e:
@@ -69,13 +77,20 @@ def load_font_from_path(font_path: Union[str, Path, None], font_size: int):
         st.error(f"Unexpected font loading error: {e}")
         return ImageFont.load_default()
 
-# ---- Math rendering: ensure math images are scaled to match font height ----
-def render_math_to_image(math_tex: str, font_size: int = 28, color=(0,0,0), target_height: int | None = None):
-    key = (math_tex, font_size, color, target_height)
+# Math rendering/cache helpers
+_math_image_cache = {}
+
+def render_math_to_image(math_tex: str, font_size: int = 28, color=(0, 0, 0)):
+    """
+    Render math (LaTeX-like) to a transparent PIL image using matplotlib if available.
+    math_tex should include delimiters like $...$ or $$...$$; we'll strip them.
+    """
+    key = (math_tex, font_size, color)
     if key in _math_image_cache:
         return _math_image_cache[key]
 
     if not MATPLOTLIB_AVAILABLE:
+        # Fallback: return an image with the raw math string rendered as plain text
         font = ImageFont.load_default()
         dummy = Image.new("RGBA", (10, 10), (255, 255, 255, 0))
         d = ImageDraw.Draw(dummy)
@@ -86,69 +101,72 @@ def render_math_to_image(math_tex: str, font_size: int = 28, color=(0,0,0), targ
         _math_image_cache[key] = img
         return img
 
+    # Strip delimiters
     content = math_tex
     if content.startswith("$$") and content.endswith("$$"):
         content = content[2:-2]
     elif content.startswith("$") and content.endswith("$"):
         content = content[1:-1]
 
-    # Render math at a reasonably high DPI then scale to the target height
-    base_dpi = 200
-    fig = plt.figure(figsize=(0.01, 0.01), dpi=base_dpi)
+    # Create a matplotlib figure and render the math text
+    fig = plt.figure(figsize=(0.01, 0.01), dpi=200)
+    text_kwargs = dict(fontsize=font_size, color='#%02x%02x%02x' % color, ha='left', va='bottom')
+    # Invisible axes
     fig.patch.set_alpha(0.0)
     ax = fig.add_axes([0, 0, 1, 1])
-    ax.axis("off")
-    text_kwargs = dict(fontsize=font_size, color='#%02x%02x%02x' % color, ha='left', va='bottom')
+    ax.axis('off')
+    # Place text at (0,0)
     t = ax.text(0, 0, f"${content}$", **text_kwargs)
+    # Draw and get bounding box
     fig.canvas.draw()
     bbox = t.get_window_extent(renderer=fig.canvas.get_renderer())
     width, height = int(bbox.width) + 6, int(bbox.height) + 6
+    # Adjust figure to bbox and re-render
     plt.close(fig)
-
-    # Re-render at exact bbox size
-    fig = plt.figure(figsize=(max(1e-3, width / base_dpi), max(1e-3, height / base_dpi)), dpi=base_dpi)
+    fig = plt.figure(figsize=(width / 200.0, height / 200.0), dpi=200)
     fig.patch.set_alpha(0.0)
     ax = fig.add_axes([0, 0, 1, 1])
-    ax.axis("off")
+    ax.axis('off')
     ax.text(0, 0, f"${content}$", **text_kwargs)
     fig.canvas.draw()
+    # Extract RGBA buffer from canvas
     buf = fig.canvas.tostring_argb()
     w, h = fig.canvas.get_width_height()
     plt.close(fig)
-
-    import numpy as _np
-    arr = _np.frombuffer(buf, dtype=_np.uint8).reshape((h, w, 4))
+    import numpy as np
+    arr = np.frombuffer(buf, dtype=np.uint8).reshape((h, w, 4))
+    # Convert ARGB -> RGBA
     arr = arr[:, :, [1, 2, 3, 0]]
     pil_img = Image.fromarray(arr, mode="RGBA")
+    # Trim transparent borders
     bbox = pil_img.getbbox()
     if bbox:
         pil_img = pil_img.crop(bbox)
-
-    # If caller requests a target height, scale the math image to match font height so it blends with handwriting
-    if target_height is not None and pil_img.height > 0:
-        scale = target_height / pil_img.height
-        if scale != 1.0:
-            new_w = max(1, int(pil_img.width * scale))
-            new_h = max(1, int(pil_img.height * scale))
-            pil_img = pil_img.resize((new_w, new_h), resample=Image.LANCZOS)
-
     _math_image_cache[key] = pil_img
     return pil_img
 
 def split_text_preserving_math(text: str):
+    """
+    Split text into tokens where math (between $...$ or $$...$$) is kept as a single token.
+    Returns a list of tokens (strings). Math tokens include their delimiters.
+    """
     tokens = []
     i = 0
     n = len(text)
     while i < n:
         if text[i] == "$":
+            # detect single or double delimiter
             if i + 1 < n and text[i+1] == "$":
+                # $$...$$
                 j = text.find("$$", i+2)
                 if j == -1:
+                    # no closing delimiter, take rest
                     tokens.append(text[i:])
                     break
                 tokens.append(text[i:j+2])
                 i = j + 2
             else:
+                # $...$
                 j = text.find("$", i+1)
                 if j == -1:
                     tokens.append(text[i:])
@@ -156,6 +174,7 @@ def split_text_preserving_math(text: str):
                 tokens.append(text[i:j+1])
                 i = j + 1
         else:
+            # accumulate until next $
             j = text.find("$", i)
             if j == -1:
                 tokens.append(text[i:])
@@ -165,32 +184,41 @@ def split_text_preserving_math(text: str):
     return tokens
 
 def wrap_text_to_pixel_width(draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont, max_width: int):
+    """
+    Wrap text into lines based on pixel width, preserving math tokens as indivisible.
+    Returns list of lines, where each line is a list of tokens. Token is a tuple (type, content).
+    type = 'text' or 'math'
+    """
     tokens = split_text_preserving_math(text)
     lines = []
     current_line = []
     current_width = 0
 
-    # correct space width calculation
-    space_bbox = draw.textbbox((0, 0), " ", font=font)
-    space_w = space_bbox[2] - space_bbox[0]
+    # width of a single space
+    space_w = draw.textbbox((0, 0), " ", font=font)[2]
 
     for tok in tokens:
         if tok.startswith("$"):
-            math_img = render_math_to_image(tok, font_size=int(font.size * 0.95), color=(0,0,0), target_height=int(font.size * 1.1))
+            # math token: treat as single unit
+            math_img = render_math_to_image(tok, font_size=int(font.size * 0.9), color=(0,0,0))
             tok_width = math_img.width
+            tok_type = "math"
+            tok_content = tok
+            # try to append math token to current line
             if current_width == 0:
-                current_line.append(("math", tok))
+                current_line.append((tok_type, tok_content))
                 current_width = tok_width
             else:
                 if current_width + space_w + tok_width <= max_width:
                     current_line.append(("text", " "))
-                    current_line.append(("math", tok))
+                    current_line.append((tok_type, tok_content))
                     current_width += space_w + tok_width
                 else:
                     lines.append(current_line)
-                    current_line = [("math", tok)]
+                    current_line = [(tok_type, tok_content)]
                     current_width = tok_width
         else:
+            # plain text: split into words and preserve newlines
             parts = tok.split("\n")
             for pi, part in enumerate(parts):
                 words = part.split()
@@ -208,12 +236,14 @@ def wrap_text_to_pixel_width(draw: ImageDraw.Draw, text: str, font: ImageFont.Fr
                             lines.append(current_line)
                             current_line = [("text", w)]
                             current_width = w_width
+                # if there was a newline split, force break
                 if pi < len(parts) - 1:
                     lines.append(current_line)
                     current_line = []
                     current_width = 0
     if current_line:
         lines.append(current_line)
+
     return lines
 
 def draw_ruled_lines(draw: ImageDraw.Draw, img_width: int, img_height: int, margin_left: int, margin_top: int, margin_right: int, line_spacing: int, line_color: tuple):
@@ -222,56 +252,61 @@ def draw_ruled_lines(draw: ImageDraw.Draw, img_width: int, img_height: int, marg
         draw.line([(margin_left - 20, y), (img_width - margin_right + 20, y)], fill=line_color, width=1)
         y += line_spacing
 
-# --- improved per-character rendering with caching and stable sizing ---
-def render_char_image(char: str, font: ImageFont.FreeTypeFont, ink_color: tuple, stroke_variation: float = 0.6):
-    key = (char, getattr(font, "size", None), stroke_variation)
-    if key in _char_image_cache:
-        return _char_image_cache[key]
+# --- NEW: per-character handwriting renderer helpers ---
 
-    # handle space by measuring width and returning transparent canvas of same height as font
+def render_char_image(char: str, font: ImageFont.FreeTypeFont, ink_color: tuple, stroke_variation: float = 0.0):
+    """
+    Render a single character to an RGBA image. stroke_variation controls
+    how many layered strokes we draw to simulate ink pressure / pen jitter.
+    """
+    # quick handling for space
     if char == " ":
-        w = font.getmask(" ").getbbox()
-        if w:
-            w = w[2]
-        else:
-            # fallback
-            w = font.size // 3
-        canvas = Image.new("RGBA", (w, max(10, font.size)), (255,255,255,0))
-        _char_image_cache[key] = canvas
-        return canvas
+        w = font.getsize(" ")[0]
+        return Image.new("RGBA", (w, max(font.size, 10)), (255, 255, 255, 0))
 
-    # use a sufficiently large temp canvas to draw glyph so we capture proper bbox
-    tmp_size = max(64, font.size * 4)
-    tmp = Image.new("RGBA", (tmp_size, tmp_size), (255,255,255,0))
-    dt = ImageDraw.Draw(tmp)
-    # draw character at offset so bbox is positive
-    offset = (tmp_size // 8, tmp_size // 8)
-    # layered strokes for pressure simulation
-    layers = max(1, int(1 + stroke_variation * 2.5))
+    # draw character on a tight canvas
+    mask_bbox = Image.new("L", (1,1))
+    # estimate size
+    temp_img = Image.new("RGBA", (font.size * 4, font.size * 4), (255,255,255,0))
+    d = ImageDraw.Draw(temp_img)
+    bbox = d.textbbox((0,0), char, font=font)
+    w = bbox[2] - bbox[0] + 6
+    h = bbox[3] - bbox[1] + 6
+    char_img = Image.new("RGBA", (w, h), (255,255,255,0))
+    cd = ImageDraw.Draw(char_img)
+
+    # layer the character multiple times with tiny random offsets to simulate strokes / pressure
+    layers = max(1, int(1 + stroke_variation * 2))
     for i in range(layers):
-        ox = random.uniform(-0.5, 0.5) * (0.4 + stroke_variation)
-        oy = random.uniform(-0.5, 0.5) * (0.4 + stroke_variation)
+        # small random offset per layer
+        ox = random.uniform(-0.8, 0.8) * (0.5 + stroke_variation)
+        oy = random.uniform(-0.8, 0.8) * (0.5 + stroke_variation)
+        # slightly vary alpha to simulate pressure
         alpha = int(255 * random.uniform(0.82, 1.0))
         fill = (ink_color[0], ink_color[1], ink_color[2], alpha)
-        dt.text((offset[0] + ox, offset[1] + oy), char, font=font, fill=fill)
-    # gentle blur but small radius to avoid fragments
-    char_img = tmp.filter(ImageFilter.GaussianBlur(radius=0.25 + stroke_variation * 0.25))
+        cd.text((3 + ox, 3 + oy), char, font=font, fill=fill)
+
+    # slight blur to simulate ink feather
+    char_img = char_img.filter(ImageFilter.GaussianBlur(radius=0.3 + stroke_variation * 0.8))
+    # trim
     bbox = char_img.getbbox()
     if bbox:
         char_img = char_img.crop(bbox)
-    # final ensure non-empty
-    if char_img.size[0] == 0 or char_img.size[1] == 0:
-        char_img = Image.new("RGBA", (max(1, font.size//2), max(1, font.size)), (255,255,255,0))
-
-    _char_image_cache[key] = char_img
     return char_img
 
 def transform_char_image(char_img: Image.Image, shear: float = 0.0, rotate: float = 0.0, scale: float = 1.0):
+    """
+    Apply affine shear and rotation to char image and return transformed image.
+    Shear is horizontal shear in degrees converted to affine.
+    """
     w, h = char_img.size
+    # scale
     if scale != 1.0:
         char_img = char_img.resize((max(1, int(w * scale)), max(1, int(h * scale))), resample=Image.BICUBIC)
         w, h = char_img.size
+    # shear (horizontal)
     if abs(shear) > 1e-6:
+        # PIL affine matrix: (a, b, c, d, e, f) maps x' = a x + b y + c ; y' = d x + e y + f
         sh = math.tan(math.radians(shear))
         a, b, c, d, e, f = 1, sh, 0, 0, 1, 0
         new_w = int(w + abs(sh) * h) + 2
@@ -295,6 +330,14 @@ def render_handwritten_image(
     header: str | None = None,
     footer: str | None = None,
 ):
+    """
+    New handwriting renderer that composes text at the character level, adding:
+    - per-character position, rotation, shear, and scale variations
+    - small baseline waviness
+    - layered strokes to simulate pressure
+    - math images are pasted in-line (rendered by matplotlib if available)
+    """
+    # Create textured paper base
     try:
         base = Image.new("RGB", (img_width, img_height), paper_color)
         noise = Image.effect_noise((img_width, img_height), 64).convert("L")
@@ -304,83 +347,271 @@ def render_handwritten_image(
     except Exception:
         base = Image.new("RGB", (img_width, img_height), paper_color)
 
-    text_layer = Image.new("RGBA", (img_width, img_height), (255,255,255,0))
+    # Transparent layer for handwriting
+    text_layer = Image.new("RGBA", (img_width, img_height), (255, 255, 255, 0))
     draw = ImageDraw.Draw(text_layer)
+
     max_text_width = img_width - margin_left - margin_left
     lines = wrap_text_to_pixel_width(draw, text, font_obj, max_text_width)
 
+    # Optional ruled lines
     if ruled:
-        ruled_color = (180, 200, 215)
+        ruled_color = (180, 200, 215)  # subtle blue
         draw_ruled_lines(draw, img_width, img_height, margin_left, margin_top, margin_left, int(font_obj.size * 1.9), ruled_color)
 
+    # Header
+    header_y = margin_top - int(font_obj.size * 1.6)
     if header:
-        draw.text((margin_left, margin_top - int(font_obj.size * 1.6)), header, font=font_obj, fill=tuple(min(255, c + 20) for c in ink_color))
+        draw.text((margin_left, header_y), header, font=font_obj, fill=tuple(min(255, c + 20) for c in ink_color))
 
-    # Handwriting parameters (tweakable)
-    baseline_wave_amp = max(0.6, font_obj.size * 0.035)
-    baseline_wave_freq = 180.0
-    char_jitter_x = max(0.4, font_obj.size * 0.018)
-    char_jitter_y = max(0.6, font_obj.size * 0.025)
-    shear_range = 4.0
-    rotate_range = rotation_jitter
-    stroke_variation = 0.6
+    # Parameters controlling 'handwriting-ness' — tweak these or expose to UI
+    baseline_wave_amp = max(0.8, font_obj.size * 0.04)   # amplitude of baseline wave
+    baseline_wave_freq = 180.0                          # larger = slower oscillation
+    char_jitter_x = max(0.6, font_obj.size * 0.02)
+    char_jitter_y = max(0.8, font_obj.size * 0.03)
+    shear_range = 4.0   # degrees
+    rotate_range = rotation_jitter  # degrees
+    stroke_variation = 0.6  # controls layered strokes
 
     x_start, y = margin_left, margin_top
+    # iterate lines
     for line_idx, line in enumerate(lines):
         if y > img_height - margin_top - font_obj.size:
             break
         x = x_start
+        # per-line small horizontal wobble
         line_offset = random.randint(-2, 2)
         for token_type, token_content in line:
             if token_type == "text":
+                # token_content may include leading spaces (we preserved them)
                 for ch in token_content:
                     if ch == " ":
-                        sp_bbox = draw.textbbox((0,0)," ", font=font_obj)
-                        sp = sp_bbox[2] - sp_bbox[0]
+                        # advance by space width
+                        sp = draw.textbbox((0,0)," ", font=font_obj)[2]
                         x += sp
                         continue
 
+                    # baseline waviness
                     wave = baseline_wave_amp * math.sin((x + line_idx * 14) / baseline_wave_freq * 2 * math.pi)
+
+                    # Per-character randomization
                     jitter_x = random.gauss(0, char_jitter_x)
                     jitter_y = random.gauss(0, char_jitter_y)
                     rotation = random.uniform(-rotate_range, rotate_range) * 0.6
                     shear = random.uniform(-shear_range, shear_range) * 0.15
-                    scale = random.uniform(0.98, 1.02)
+                    scale = random.uniform(0.96, 1.03)
 
+                    # render char
                     char_img = render_char_image(ch, font_obj, ink_color, stroke_variation=stroke_variation)
                     char_img = transform_char_image(char_img, shear=shear, rotate=rotation, scale=scale)
 
+                    # paste with jitter
                     px = int(x + jitter_x + line_offset)
                     py = int(y + jitter_y + wave)
-                    # safe paste using alpha channel
+                    # when pasting, ensure we don't paste outside canvas
                     text_layer.paste(char_img, (px, py), char_img)
-                    # advance x: approximate using char_img width
-                    x += char_img.width + random.uniform(0.6, 1.4)
-            else:
-                # math: render scaled to match font height so it doesn't dominate the line
-                target_h = int(font_obj.size * 1.1)
-                math_img = render_math_to_image(token_content, font_size=int(font_obj.size * 0.95), color=ink_color, target_height=target_h)
-                # if math image still bigger, downscale
-                if math_img.height > target_h:
-                    s = target_h / math_img.height
-                    math_img = math_img.resize((max(1, int(math_img.width * s)), target_h), resample=Image.LANCZOS)
-                py = int(y - (math_img.height - font_obj.size) / 2 + random.uniform(-1, 1))
+
+                    # advance x by char width
+                    x += char_img.width + random.uniform(0.5, 1.6)  # variable inter-char spacing
+            else:  # math token
+                math_img = render_math_to_image(token_content, font_size=int(font_obj.size * 0.95), color=ink_color)
+                # center math vertically on the current baseline approximated by font size
+                py = int(y - (math_img.height - font_obj.size) / 2 + random.uniform(-2, 2))
                 px = int(x + random.uniform(-2, 2))
                 text_layer.paste(math_img, (px, py), math_img)
                 x += math_img.width + 4
 
+        # compute line height (use font size scaled and some extra spacing)
         y += int(font_obj.size * 1.0) + line_spacing
 
-    # small, gentle bleed (very small radius prevents fragments)
-    text_layer = text_layer.filter(ImageFilter.GaussianBlur(radius=0.18))
+    # subtle bleed / ink smudge
+    text_layer = text_layer.filter(ImageFilter.GaussianBlur(radius=0.2))
 
-    angle = random.uniform(-rotation_jitter, rotation_jitter) * 0.4
+    # Rotate slightly for realism (global)
+    angle = random.uniform(-rotation_jitter, rotation_jitter) * 0.5
     rotated = text_layer.rotate(angle, resample=Image.BICUBIC, expand=False, fillcolor=(255,255,255,0))
 
+    # Composite onto paper
     final = base.convert("RGBA")
     final = Image.alpha_composite(final, rotated).convert("RGB")
+
+    # Slight color/contrast tweak
     final = ImageOps.autocontrast(final, cutoff=1)
 
     return final
 
-# ... rest of the streamlit UI and flow unchanged (omitted here for brevity) ...
+def split_text_into_pages(text: str, pages: int):
+    words = text.split()
+    if pages <= 1:
+        return [text]
+    per_page = max(100, len(words) // pages)
+    chunks = []
+    i = 0
+    for p in range(pages):
+        chunk = words[i:i + per_page]
+        i += per_page
+        if p == pages - 1:
+            chunk += words[i:]
+        chunks.append(" ".join(chunk).strip())
+    return [c if c else " " for c in chunks]
+
+# Streamlit UI
+st.set_page_config(page_title="AI Handwritten Assignment Generator", layout="wide")
+st.title("AI Handwritten Assignment Generator ✍️ — Human-like Handwriting")
+
+# Sidebar controls
+st.sidebar.header("Font & Style options")
+uploaded_font = st.sidebar.file_uploader("Upload a TTF/OTF font to use (optional)", type=["ttf", "otf"])
+font_size = st.sidebar.slider("Font size (px)", min_value=18, max_value=72, value=32, step=1)
+pages = st.sidebar.number_input("Approximate pages (handwritten) to GENERATE", min_value=1, max_value=10, value=2)
+ink_color_choice = st.sidebar.selectbox("Ink color", options=["Black", "Dark Blue", "Brown", "Gray"])
+style_ruled = st.sidebar.checkbox("Add ruled lines", value=False)
+rotation_jitter = st.sidebar.slider("Rotation jitter (degrees)", min_value=0.0, max_value=5.0, value=1.5, step=0.1)
+paper_color_choice = st.sidebar.selectbox("Paper color", options=["White", "Ivory", "Aged (beige)"])
+# New controls for "handwriting realism"
+st.sidebar.subheader("Handwriting realism")
+char_pressure = st.sidebar.slider("Pressure variation", min_value=0.0, max_value=1.5, value=0.6, step=0.1)
+baseline_wobble = st.sidebar.slider("Baseline wobble", min_value=0.0, max_value=2.5, value=1.0, step=0.1)
+
+# Resolve bundled font path relative to this file
+try:
+    repo_font_path = Path(__file__).parent / "fonts" / "handwriting.ttf"
+except NameError:
+    repo_font_path = Path(os.getcwd()) / "fonts" / "handwriting.ttf"
+
+font_path_to_use = None
+if uploaded_font is not None:
+    try:
+        tmp_dir = tempfile.gettempdir()
+        tmp_font_path = Path(tmp_dir) / uploaded_font.name
+        with open(tmp_font_path, "wb") as f:
+            f.write(uploaded_font.getbuffer())
+        font_path_to_use = tmp_font_path
+        st.sidebar.success(f"Using uploaded font: {uploaded_font.name}")
+    except Exception as e:
+        st.sidebar.error(f"Failed to save uploaded font: {e}")
+        font_path_to_use = None
+else:
+    if repo_font_path.exists():
+        font_path_to_use = repo_font_path
+        st.sidebar.info(f"Using bundled font: {repo_font_path.name}")
+    else:
+        st.sidebar.warning("No bundled font found at 'fonts/handwriting.ttf'. Upload a font or add one to the repo.")
+
+# Map color choices to RGB
+ink_colors_map = {
+    "Black": (20, 20, 20),
+    "Dark Blue": (8, 35, 86),
+    "Brown": (60, 30, 10),
+    "Gray": (60, 60, 60),
+}
+paper_colors_map = {
+    "White": (255, 255, 255),
+    "Ivory": (245, 242, 230),
+    "Aged (beige)": (238, 230, 210),
+}
+
+st.sidebar.markdown(" ")
+st.sidebar.markdown("Generated pages will be saved as images and offered as a ZIP and combined PDF.")
+if not MATPLOTLIB_AVAILABLE:
+    st.sidebar.warning("Matplotlib not available: math will be rendered as plain text. Install matplotlib for proper LaTeX rendering.")
+
+# Input area
+question = st.text_area("Enter your assignment question (you may include math in LaTeX, e.g. $E=mc^2$ )", height=150)
+
+if st.button("Generate Styled Handwritten Assignment"):
+    if not question.strip():
+        st.warning("Please enter an assignment question.")
+    else:
+        with st.spinner("Generating answer with OpenAI GPT..."):
+            answer_text = generate_assignment_answer(question, int(pages))
+
+        if not answer_text:
+            st.error("No answer generated. See errors above.")
+        else:
+            # Show approximate pages required for the generated text
+            approx_words_per_page = 180
+            word_count = len(answer_text.split())
+            approx_pages_needed = max(1, (word_count + approx_words_per_page - 1) // approx_words_per_page)
+            st.info(f"Generated answer contains ~{word_count} words. Approx pages needed (handwritten): {approx_pages_needed} pages (with ~{approx_words_per_page} words per page).")
+
+            font_obj = load_font_from_path(font_path_to_use, int(font_size))
+
+            # Split text into page-wise chunks (based on user 'pages' input)
+            chunks = split_text_into_pages(answer_text, int(pages))
+
+            images: List[Image.Image] = []
+            tmp_dir = Path(tempfile.mkdtemp(prefix="handwritten_pages_"))
+
+            st.info(f"Rendering {len(chunks)} page(s)...")
+            progress = st.progress(0)
+            for idx, chunk in enumerate(chunks, start=1):
+                with st.spinner(f"Rendering page {idx}/{len(chunks)}..."):
+                    # Slight variation per page and apply UI realism values
+                    ink_variation = tuple(max(0, min(255, c + random.randint(-10, 10))) for c in ink_colors_map.get(ink_color_choice, (0,0,0)))
+                    paper_color = paper_colors_map.get(paper_color_choice, (245,242,230))
+                    header = f"Answer — Page {idx}" if len(chunks) > 1 else None
+                    footer = None  # watermark removed
+
+                    # Inject the user-controlled realism parameters into the global settings
+                    img = render_handwritten_image(
+                        chunk,
+                        font_obj=font_obj,
+                        img_width=1240,
+                        img_height=1754,
+                        margin_left=100,
+                        margin_top=120,
+                        line_spacing=int(font_obj.size * 0.45),
+                        ink_color=ink_variation,
+                        paper_color=paper_color,
+                        ruled=style_ruled,
+                        rotation_jitter=float(rotation_jitter),
+                        header=header,
+                        footer=footer,
+                    )
+                    out_path = tmp_dir / f"assignment_page_{idx:02d}.png"
+                    img.save(out_path)
+                    images.append(img)
+                progress.progress(idx / len(chunks))
+
+            st.success("Rendering complete!")
+
+            # Show thumbnails
+            st.write("Preview (click to enlarge):")
+            cols = st.columns(min(4, len(images)))
+            for i, img in enumerate(images):
+                with cols[i % len(cols)]:
+                    st.image(img.resize((300, int(300 * img.height / img.width))), use_column_width=False, caption=f"Page {i+1}")
+
+            # Prepare ZIP
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for i, img in enumerate(images, start=1):
+                    img_bytes = io.BytesIO()
+                    img.save(img_bytes, format="PNG")
+                    img_bytes.seek(0)
+                    zf.writestr(f"assignment_page_{i:02d}.png", img_bytes.read())
+            zip_buffer.seek(0)
+
+            st.download_button(
+                label="Download all pages as ZIP",
+                data=zip_buffer,
+                file_name="handwritten_assignment_pages.zip",
+                mime="application/zip",
+            )
+
+            # Prepare combined PDF
+            if images:
+                pdf_bytes = io.BytesIO()
+                rgb_images = [im.convert("RGB") for im in images]
+                rgb_images[0].save(pdf_bytes, format="PDF", save_all=True, append_images=rgb_images[1:])
+                pdf_bytes.seek(0)
+                st.download_button(
+                    label="Download combined PDF",
+                    data=pdf_bytes,
+                    file_name="handwritten_assignment.pdf",
+                    mime="application/pdf",
+                )
+
+            st.success(f"Saved {len(images)} images to {tmp_dir}")
+            st.write("If you want different styling (more ink variation, different font), tweak the sidebar and regenerate.")
