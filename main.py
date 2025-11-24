@@ -11,7 +11,7 @@ def generate_assignment_answer(question: str, pages: int = 2) -> str:
     target_words = pages * approx_words_per_page
 
     prompt = f"""
-You are an Indian first-year b tech student.
+You are an Indian first-year LLB student.
 Write an exam-style answer to the following question.
 
 Question: {question}
@@ -23,14 +23,15 @@ Constraints:
 - No bullet points, just paragraphs.
 """
 
-   response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "user", "content": prompt}
-    ],
-    max_tokens=2048,
-    temperature=0.7
-)
+    response = client.chat.completions.create(
+        model="gpt-4o",  # use gpt-4o or gpt-3.5-turbo if needed
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=min(target_words * 2, 2048),
+        temperature=0.7
+    )
+    return response.choices[0].message.content.strip()
 
     return response.choices[0].message.content.strip()
 
