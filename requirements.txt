@@ -1,5 +1,5 @@
-openai
-python-dotenv
-Pillow
-textwrap3
-streamlit
+streamlit>=1.24.0
+openai>=1.0.0
+pillow>=9.0.0
+matplotlib>=3.6
+numpy>=1.24
