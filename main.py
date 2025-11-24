@@ -1,16 +1,17 @@
 import os
 import textwrap
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont
 import openai
+from PIL import Image, ImageDraw, ImageFont
+import streamlit as st
 
-# Load environment variables
+# Load API key
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Generate assignment answer with OpenAI GPT-4
+# Generate text with OpenAI GPT-4
 def generate_assignment_answer(question: str, pages: int = 2) -> str:
-    approx_words_per_page = 180  # adjust as needed
+    approx_words_per_page = 180
     target_words = pages * approx_words_per_page
 
     prompt = f"""
@@ -29,60 +30,69 @@ Constraints:
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=target_words * 4,  # approx tokens = words * 4/3, + buffer
+        max_tokens=target_words * 4,
         temperature=0.7,
     )
 
-    answer = response.choices[0].message.content.strip()
-    return answer
+    return response.choices[0].message.content.strip()
 
-# Render handwritten style image using Pillow
-def render_handwritten_page(
+# Render handwritten text as image
+def render_handwritten_image(
     text: str,
-    output_path: str = "assignment_page.png",
     font_path: str = "fonts/handwriting.ttf",
     font_size: int = 32,
+    img_width: int = 1240,
+    img_height: int = 1754,
+    margin_left: int = 120,
+    margin_top: int = 120,
+    line_spacing: int = 10,
 ):
-    img_width, img_height = 1240, 1754  # roughly half A4 at 300 dpi
-    margin_left, margin_top = 120, 120
-    line_spacing = 10
-
-    # Create white canvas
-    image = Image.new("RGB", (img_width, img_height), color="white")
+    image = Image.new("RGB", (img_width, img_height), "white")
     draw = ImageDraw.Draw(image)
     font = ImageFont.truetype(font_path, font_size)
 
     max_text_width = img_width - 2 * margin_left
     lines = []
-    # Wrap text for each paragraph
     for paragraph in text.split("\n"):
         if not paragraph.strip():
             lines.append("")
             continue
-        wrapped = textwrap.wrap(paragraph, width=60)  # tweak this for your font/size
+        wrapped = textwrap.wrap(paragraph, width=60)
         lines.extend(wrapped)
 
     x, y = margin_left, margin_top
     for line in lines:
         if y > img_height - margin_top:
-            break  # stop if page full
+            break
         draw.text((x, y), line, font=font, fill="black")
         _, line_height = draw.textsize(line, font=font)
         y += line_height + line_spacing
 
-    image.save(output_path)
-    print(f"Saved handwritten page to {output_path}")
+    return image
 
-def main():
-    question = input("Enter your assignment question: ")
-    pages = int(input("Approx pages (handwritten): ") or "2")
+# Streamlit UI
+st.title("AI Handwritten Assignment Generator ✍️")
 
-    print("\nGenerating answer with OpenAI GPT-4...")
-    answer_text = generate_assignment_answer(question, pages)
-    print("Done. Rendering handwriting...")
+question = st.text_area("Enter your assignment question", height=150)
+pages = st.number_input("Approximate pages (handwritten)", min_value=1, max_value=10, value=2)
 
-    render_handwritten_page(answer_text, output_path="assignment_page.png")
-    print("Complete! See assignment_page.png")
+if st.button("Generate Handwritten Assignment"):
+    if not question.strip():
+        st.warning("Please enter an assignment question.")
+    else:
+        with st.spinner("Generating answer with OpenAI GPT-4..."):
+            answer_text = generate_assignment_answer(question, pages)
 
-if __name__ == "__main__":
-    main()
+        with st.spinner("Rendering handwritten image..."):
+            img = render_handwritten_image(answer_text)
+
+        st.image(img, caption="Generated handwritten assignment page", use_column_width=True)
+
+        img.save("assignment_page.png")
+        st.success("Rendered page saved as assignment_page.png")
+        st.download_button(
+            label="Download Handwritten Assignment Image",
+            data=open("assignment_page.png", "rb").read(),
+            file_name="assignment_page.png",
+            mime="image/png",
+        )
