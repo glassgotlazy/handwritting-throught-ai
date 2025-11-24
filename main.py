@@ -4,10 +4,13 @@ from dotenv import load_dotenv
 import openai
 from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
+from openai import OpenAI
 
-# Load API key
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Access key from secrets
+api_key = st.secrets["OPENAI_API_KEY"]
+
+# Initialize client
+client = OpenAI(api_key=api_key)
 
 # Generate text with OpenAI GPT-4
 def generate_assignment_answer(question: str, pages: int = 2) -> str:
