@@ -30,12 +30,14 @@ Constraints:
 - No bullet points, just paragraphs.
 """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=target_words * 4,
-        temperature=0.7,
-    )
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": prompt}
+    ],
+    max_tokens=target_words * 4,
+    temperature=0.7
+)
 
     return response.choices[0].message.content.strip()
 
