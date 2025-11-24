@@ -28,19 +28,17 @@ except Exception:
 # ==================== CONFIGURATION ====================
 @dataclass
 class HandwritingConfig:
-    """Configuration optimized for MAXIMUM TEXT DARKNESS"""
-    char_rotation_range: float = 1.5
-    char_scale_variance: float = 0.04
-    char_shear_range: float = 2.5
-    char_spacing_variance: float = 1.0
-    baseline_wave_amplitude: float = 0.8
+    """Optimized configuration for natural dark handwriting"""
+    char_rotation_range: float = 1.8
+    char_scale_variance: float = 0.05
+    char_shear_range: float = 3.0
+    char_spacing_variance: float = 0.8
+    baseline_wave_amplitude: float = 0.9
     baseline_wave_frequency: float = 180.0
-    baseline_drift: float = 0.25
-    ink_pressure_layers: int = 8  # MAXIMUM LAYERS
-    ink_bleeding: float = 0.0  # NO BLUR - MAXIMUM SHARPNESS
+    baseline_drift: float = 0.3
+    ink_pressure_layers: int = 6  # Optimal for darkness
+    ink_bleeding: float = 0.15  # Slight blur for natural look
     paper_noise_intensity: float = 0.08
-    paper_grain_size: int = 2
-    fatigue_enabled: bool = False
     ligature_detection: bool = True
     word_spacing_natural: bool = True
     margin_irregularity: float = 6.0
@@ -181,7 +179,7 @@ def load_font_from_path(font_path: Union[str, Path, None], font_size: int):
 _math_cache = {}
 
 def render_math_to_image(math_tex: str, font_size: int, color: Tuple[int,int,int]) -> Image.Image:
-    """Render math with MAXIMUM darkness"""
+    """Render math with proper darkness"""
     cache_key = (math_tex, font_size, color)
     if cache_key in _math_cache:
         return _math_cache[cache_key]
@@ -364,13 +362,12 @@ def create_textured_paper(width: int, height: int, base_color: Tuple[int,int,int
         pass
     return base
 
-# ==================== CRITICAL: ABSOLUTE MAXIMUM DARKNESS ====================
-def render_character_ABSOLUTE_DARKNESS(char: str, font: ImageFont.FreeTypeFont, 
-                                      ink_color: Tuple[int,int,int], 
-                                      config: HandwritingConfig) -> Image.Image:
+# ==================== OPTIMIZED CHARACTER RENDERING ====================
+def render_character_dark_natural(char: str, font: ImageFont.FreeTypeFont, 
+                                 ink_color: Tuple[int,int,int], 
+                                 config: HandwritingConfig) -> Image.Image:
     """
-    CRITICAL FIX: Render character with ABSOLUTE MAXIMUM DARKNESS
-    Same darkness as math formulas - NO TRANSPARENCY AT ALL
+    Render character with optimal darkness and natural appearance
     """
     if char == " ":
         try:
@@ -384,23 +381,29 @@ def render_character_ABSOLUTE_DARKNESS(char: str, font: ImageFont.FreeTypeFont,
     d = ImageDraw.Draw(temp_img)
     try:
         bbox = d.textbbox((0, 0), char, font=font)
-        w = max(bbox[2] - bbox[0] + 16, 5)
-        h = max(bbox[3] - bbox[1] + 16, 10)
+        w = max(bbox[2] - bbox[0] + 14, 5)
+        h = max(bbox[3] - bbox[1] + 14, 10)
     except:
         w, h = font.size * 2, font.size * 2
     
     char_img = Image.new("RGBA", (w, h), (255, 255, 255, 0))
     cd = ImageDraw.Draw(char_img)
     
-    # CRITICAL: Draw character with ABSOLUTE MAXIMUM DARKNESS
-    # NO RANDOMNESS - 100% OPACITY ALWAYS
-    fill_color = (ink_color[0], ink_color[1], ink_color[2], 255)  # ALWAYS 255 ALPHA
+    # OPTIMIZED: 6 layers with high opacity and slight variation for natural look
+    for i in range(config.ink_pressure_layers):
+        # Minimal offset for natural ink flow
+        offset_x = random.gauss(0, 0.2)
+        offset_y = random.gauss(0, 0.2)
+        
+        # High opacity with slight natural variation
+        alpha = int(255 * random.uniform(0.95, 1.0))
+        fill_color = (ink_color[0], ink_color[1], ink_color[2], alpha)
+        
+        cd.text((7 + offset_x, 7 + offset_y), char, font=font, fill=fill_color)
     
-    # Draw MULTIPLE TIMES at EXACT SAME position for MAXIMUM darkness
-    for _ in range(config.ink_pressure_layers):
-        cd.text((8, 8), char, font=font, fill=fill_color)
-    
-    # NO BLUR - Keep maximum sharpness and darkness
+    # OPTIMIZED: Slight blur for natural ink effect while maintaining darkness
+    if config.ink_bleeding > 0:
+        char_img = char_img.filter(ImageFilter.GaussianBlur(radius=config.ink_bleeding))
     
     # Trim
     bbox = char_img.getbbox()
@@ -410,7 +413,7 @@ def render_character_ABSOLUTE_DARKNESS(char: str, font: ImageFont.FreeTypeFont,
     return char_img
 
 def apply_char_transform(char_img: Image.Image, rotation: float, shear: float, scale: float) -> Image.Image:
-    """Apply minimal transformations"""
+    """Apply transformations"""
     w, h = char_img.size
     
     if abs(scale - 1.0) > 0.01:
@@ -427,15 +430,24 @@ def apply_char_transform(char_img: Image.Image, rotation: float, shear: float, s
     
     return char_img
 
+def should_ligate(prev_char: str, curr_char: str) -> bool:
+    """Check for natural letter connections"""
+    ligature_pairs = [
+        ('f', 'i'), ('f', 'l'), ('t', 'h'), ('c', 'h'),
+        ('o', 'n'), ('i', 'n'), ('r', 'e'), ('t', 'o'),
+        ('a', 'n'), ('e', 'r'), ('i', 't')
+    ]
+    return (prev_char.lower(), curr_char.lower()) in ligature_pairs
+
 # ==================== MAIN RENDERING ====================
 def render_handwritten_page(text: str, font_obj: ImageFont.ImageFont, config: HandwritingConfig,
                           img_width: int = 1240, img_height: int = 1754,
-                          margin_left: int = 120, margin_top: int = 120, line_spacing: int = 10,
+                          margin_left: int = 120, margin_top: int = 120, line_spacing: int = 12,
                           ink_color: Tuple[int,int,int] = (5, 5, 5),
                           paper_color: Tuple[int,int,int] = (245, 242, 230),
                           ruled: bool = False, page_number: int = 1, total_pages: int = 1,
                           header_text: str = None) -> Image.Image:
-    """Render with ABSOLUTE darkness"""
+    """Render with optimal darkness and natural flow"""
     
     base = create_textured_paper(img_width, img_height, paper_color, config.paper_noise_intensity)
     text_layer = Image.new("RGBA", (img_width, img_height), (255, 255, 255, 0))
@@ -447,7 +459,8 @@ def render_handwritten_page(text: str, font_obj: ImageFont.ImageFont, config: Ha
     if ruled:
         y = margin_top
         while y < img_height - margin_top:
-            draw.line([(margin_left - 20, y), (img_width - margin_left + 20, y)], 
+            y_var = random.uniform(-0.5, 0.5)
+            draw.line([(margin_left - 20, y + y_var), (img_width - margin_left + 20, y + y_var)], 
                      fill=(180, 200, 215), width=1)
             y += int(font_obj.size * 1.9)
     
@@ -457,6 +470,7 @@ def render_handwritten_page(text: str, font_obj: ImageFont.ImageFont, config: Ha
     
     x_start = margin_left + random.uniform(-config.margin_irregularity, config.margin_irregularity)
     y = margin_top
+    prev_char = None
     
     for line_idx, line in enumerate(lines):
         if y > img_height - margin_top - font_obj.size * 2:
@@ -482,21 +496,21 @@ def render_handwritten_page(text: str, font_obj: ImageFont.ImageFont, config: Ha
                             sp = draw.textbbox((0, 0), " ", font=font_obj)[2]
                         except:
                             sp = font_obj.size // 3
-                        x += sp * random.uniform(0.95, 1.1)
+                        x += sp * random.uniform(0.95, 1.08)
+                        prev_char = None
                         continue
                     
                     wave = config.baseline_wave_amplitude * math.sin(
                         (x + line_idx * 17) / config.baseline_wave_frequency * 2 * math.pi)
                     baseline_offset += config.baseline_drift * random.uniform(-0.5, 0.5)
                     
-                    jitter_x = random.gauss(0, font_obj.size * 0.015)
-                    jitter_y = random.gauss(0, font_obj.size * 0.02)
-                    rotation = random.gauss(0, config.char_rotation_range) * 0.4
-                    shear = random.gauss(0, config.char_shear_range) * 0.1
+                    jitter_x = random.gauss(0, font_obj.size * 0.018)
+                    jitter_y = random.gauss(0, font_obj.size * 0.025)
+                    rotation = random.gauss(0, config.char_rotation_range) * 0.5
+                    shear = random.gauss(0, config.char_shear_range) * 0.12
                     scale = random.gauss(1.0, config.char_scale_variance)
                     
-                    # CRITICAL: Use ABSOLUTE DARKNESS function
-                    char_img = render_character_ABSOLUTE_DARKNESS(char, font_obj, ink_color, config)
+                    char_img = render_character_dark_natural(char, font_obj, ink_color, config)
                     char_img = apply_char_transform(char_img, rotation, shear, scale)
                     
                     px = int(x + jitter_x)
@@ -505,17 +519,24 @@ def render_handwritten_page(text: str, font_obj: ImageFont.ImageFont, config: Ha
                     if 0 <= px < img_width and 0 <= py < img_height:
                         text_layer.paste(char_img, (px, py), char_img)
                     
-                    x += char_img.width + random.gauss(0.8, config.char_spacing_variance)
+                    # Natural spacing with ligature adjustment
+                    spacing = char_img.width + random.gauss(1.0, config.char_spacing_variance)
+                    if config.ligature_detection and prev_char and should_ligate(prev_char, char):
+                        spacing *= 0.7
+                    
+                    x += spacing
+                    prev_char = char
                     
             else:  # Math
                 if extra_data:
-                    py = int(y - (extra_data.height - font_obj.size) / 2)
-                    px = int(x)
+                    py = int(y - (extra_data.height - font_obj.size) / 2 + random.uniform(-1, 1))
+                    px = int(x + random.uniform(-0.5, 0.5))
                     if 0 <= px < img_width and 0 <= py < img_height:
                         text_layer.paste(extra_data, (px, py), extra_data)
-                    x += extra_data.width + 4
+                    x += extra_data.width + 5
+                prev_char = None
         
-        y += int(font_obj.size * 1.05) + line_spacing
+        y += int(font_obj.size * 1.08) + line_spacing + random.uniform(-0.5, 0.5)
     
     if total_pages > 1:
         footer_text = f"— {page_number} —"
@@ -526,18 +547,16 @@ def render_handwritten_page(text: str, font_obj: ImageFont.ImageFont, config: Ha
         draw.text(((img_width - footer_w) // 2, img_height - margin_top // 2), 
                  footer_text, font=font_obj, fill=ink_color)
     
-    # NO BLUR - preserve darkness
-    
-    # Slight rotation
-    text_layer = text_layer.rotate(random.uniform(-0.4, 0.4), Image.BICUBIC, False, (255, 255, 255, 0))
+    # Slight rotation for realism
+    text_layer = text_layer.rotate(random.uniform(-0.5, 0.5), Image.BICUBIC, False, (255, 255, 255, 0))
     
     # Composite
     final = base.convert("RGBA")
     final = Image.alpha_composite(final, text_layer).convert("RGB")
     
-    # ENHANCE contrast for maximum darkness
+    # Enhance for optimal darkness
     enhancer = ImageEnhance.Contrast(final)
-    final = enhancer.enhance(1.3)
+    final = enhancer.enhance(1.15)
     
     return final
 
@@ -559,13 +578,13 @@ def split_text_into_pages(text: str, pages: int) -> List[str]:
             for p in range(pages)]
 
 # ==================== STREAMLIT UI ====================
-st.set_page_config(page_title="✍️ ABSOLUTE DARKNESS Edition", layout="wide")
+st.set_page_config(page_title="✍️ Perfect Handwriting Pro", layout="wide")
 
 st.markdown("""
 <style>
     .main-header {
         text-align: center; padding: 1.5rem;
-        background: linear-gradient(135deg, #000000 0%, #434343 100%);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white; border-radius: 10px; margin-bottom: 2rem;
     }
     .feature-box {background-color: #f0f2f6; padding: 1rem; border-radius: 8px; margin: 0.5rem 0;}
@@ -576,45 +595,72 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <h1>✍️ ABSOLUTE DARKNESS Edition</h1>
-    <p>🔥 100% OPACITY - ZERO TRANSPARENCY - GUARANTEED DARK TEXT</p>
+    <h1>✍️ Perfect Handwriting Pro</h1>
+    <p>✨ Dark, Natural & Beautiful Handwriting</p>
 </div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("🎨 Config")
-    uploaded_font = st.file_uploader("Font", type=["ttf", "otf"])
-    font_size = st.slider("Size", 18, 72, 32)
+    st.header("🎨 Configuration")
+    uploaded_font = st.file_uploader("Upload Font", type=["ttf", "otf"])
+    font_size = st.slider("Font Size", 18, 72, 32)
     subject = st.selectbox("Subject", ["general", "physics", "mathematics", "science"])
     
     st.subheader("🔍 Math OCR")
-    math_img = st.file_uploader("Math image", type=["jpg", "png"])
-    if math_img and st.button("Extract"):
+    math_img = st.file_uploader("Upload math image", type=["jpg", "png"])
+    if math_img and st.button("📖 Extract Math"):
         with st.spinner("Reading..."):
             extracted = read_math_from_image(math_img.read())
             if extracted:
-                st.success("✅")
+                st.success("✅ Extracted!")
                 st.code(extracted)
                 st.session_state['math'] = extracted
     
-    config = HandwritingConfig(
-        ink_pressure_layers=8,
-        ink_bleeding=0.0,
-        char_rotation_range=1.5,
-        baseline_wave_amplitude=0.8
-    )
+    st.subheader("🎭 Style")
+    style_preset = st.selectbox("Preset", [
+        "Perfect Balance (Recommended)",
+        "Extra Natural",
+        "Neat & Clean"
+    ])
     
-    ink_choice = st.selectbox("Ink", ["Absolute Black", "Dark Blue"])
-    paper_choice = st.selectbox("Paper", ["Ivory", "White"])
-    ruled = st.checkbox("Ruled")
-    include_diagrams = st.checkbox("Diagrams", subject=="physics")
+    presets = {
+        "Perfect Balance (Recommended)": HandwritingConfig(),
+        "Extra Natural": HandwritingConfig(
+            char_rotation_range=2.2,
+            baseline_wave_amplitude=1.1,
+            char_spacing_variance=1.0,
+            ink_bleeding=0.2
+        ),
+        "Neat & Clean": HandwritingConfig(
+            char_rotation_range=1.2,
+            baseline_wave_amplitude=0.6,
+            char_spacing_variance=0.6,
+            ink_bleeding=0.1
+        )
+    }
     
-    ink_colors = {"Absolute Black": (0, 0, 0), "Dark Blue": (0, 20, 60)}
-    paper_colors = {"White": (255, 255, 255), "Ivory": (245, 242, 230)}
+    config = presets[style_preset]
     
-    st.error("🔥 **ABSOLUTE DARKNESS: 100% OPACITY - NO BLUR**")
+    ink_choice = st.selectbox("Ink Color", ["Dark Black", "Blue Black", "Brown"])
+    paper_choice = st.selectbox("Paper", ["Ivory", "White", "Aged"])
+    ruled = st.checkbox("Add Ruled Lines")
+    include_diagrams = st.checkbox("Generate Diagrams", subject=="physics")
+    
+    ink_colors = {
+        "Dark Black": (8, 8, 8),
+        "Blue Black": (10, 25, 65),
+        "Brown": (45, 25, 10)
+    }
+    
+    paper_colors = {
+        "White": (255, 255, 255),
+        "Ivory": (245, 242, 230),
+        "Aged": (238, 230, 210)
+    }
+    
+    st.success("✅ **Optimized for natural dark handwriting!**")
 
-# Font
+# Load font
 try:
     repo_font_path = Path(__file__).parent / "fonts" / "handwriting.ttf"
 except:
@@ -629,19 +675,20 @@ if uploaded_font:
 elif repo_font_path.exists():
     font_path_to_use = repo_font_path
 
-# Main
+# Main interface
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    question = st.text_area("📝 Text", height=250, value=st.session_state.get('math', ''))
+    question = st.text_area("📝 Enter Text or Question", height=250,
+                           placeholder="Type or paste your text here...",
+                           value=st.session_state.get('math', ''))
     
     if question.strip():
         estimate = estimate_pages_needed(question, int(font_size))
         st.markdown(f"""
         <div class="estimate-box">
-        📊 Pages: <b>{estimate['estimated_pages']}</b> | 
-        Words: {estimate['word_count']} | 
-        ~{estimate['words_per_page']}/page
+        📊 <b>Estimation:</b> {estimate['estimated_pages']} pages needed | 
+        {estimate['word_count']} words (~{estimate['words_per_page']}/page)
         </div>
         """, unsafe_allow_html=True)
         suggested_pages = estimate['estimated_pages']
@@ -653,42 +700,49 @@ with col1:
 with col2:
     st.markdown("""
     <div class="feature-box">
-    ✅ <b>100% OPACITY</b><br>
-    ✅ <b>8 ink layers</b><br>
-    ✅ <b>ZERO blur</b><br>
-    ✅ <b>Maximum contrast</b><br>
-    ✅ <b>Absolute darkness</b>
+    ✅ <b>Dark & Natural Ink</b><br>
+    ✅ <b>Smart Page Estimation</b><br>
+    ✅ <b>Math Formula OCR</b><br>
+    ✅ <b>Physics Diagrams</b><br>
+    ✅ <b>Realistic Flow</b><br>
+    ✅ <b>PDF/ZIP Export</b>
     </div>
     """, unsafe_allow_html=True)
 
 col_b1, col_b2 = st.columns(2)
 
 with col_b1:
-    gen_ai = st.button("🤖 AI + Handwriting", type="primary", use_container_width=True)
+    gen_ai = st.button("🤖 AI Answer + Handwriting", type="primary", use_container_width=True)
 
 with col_b2:
-    gen_direct = st.button("✍️ Direct", use_container_width=True)
+    gen_direct = st.button("✍️ Text to Handwriting", use_container_width=True)
 
 if gen_ai or gen_direct:
     if not question.strip():
-        st.warning("⚠️ Enter text!")
+        st.warning("⚠️ Please enter text!")
     else:
         if gen_ai:
-            with st.spinner("Generating..."):
+            with st.spinner("🤖 Generating AI answer..."):
                 answer_text = generate_assignment_answer(question, int(pages), subject, include_diagrams)
         else:
             answer_text = question
         
         if answer_text:
-            st.success(f"✅ {len(answer_text.split())} words")
+            st.success(f"✅ Generated {len(answer_text.split())} words")
+            
+            with st.expander("📄 View Generated Text"):
+                st.text_area("Content", answer_text, height=200)
             
             font_obj = load_font_from_path(font_path_to_use, int(font_size))
             chunks = split_text_into_pages(answer_text, int(pages))
             
             images = []
             progress = st.progress(0)
+            status = st.empty()
             
             for idx, chunk in enumerate(chunks, start=1):
+                status.text(f"✍️ Rendering page {idx}/{len(chunks)}...")
+                
                 img = render_handwritten_page(
                     chunk, font_obj, config,
                     ink_color=ink_colors[ink_choice],
@@ -701,39 +755,44 @@ if gen_ai or gen_direct:
                 images.append(img)
                 progress.progress(idx / len(chunks))
             
+            status.text("✅ Rendering complete!")
+            
             st.subheader("📄 Preview")
             cols = st.columns(min(3, len(images)))
             for i, img in enumerate(images):
                 with cols[i % len(cols)]:
-                    st.image(img.resize((300, int(300 * img.height / img.width))), caption=f"Page {i+1}")
+                    st.image(img.resize((300, int(300 * img.height / img.width))), 
+                            caption=f"Page {i+1}", use_container_width=True)
             
             st.subheader("⬇️ Download")
             col_d1, col_d2 = st.columns(2)
             
             with col_d1:
                 zip_buf = io.BytesIO()
-                with zipfile.ZipFile(zip_buf, "w") as zf:
+                with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
                     for i, img in enumerate(images, 1):
                         img_bytes = io.BytesIO()
-                        img.save(img_bytes, "PNG", quality=100)
+                        img.save(img_bytes, "PNG", quality=98)
                         img_bytes.seek(0)
                         zf.writestr(f"page_{i:02d}.png", img_bytes.read())
                 zip_buf.seek(0)
-                st.download_button("📦 ZIP", zip_buf, "handwritten.zip", "application/zip", use_container_width=True)
+                st.download_button("📦 Download ZIP", zip_buf, "handwritten.zip", 
+                                  "application/zip", use_container_width=True)
             
             with col_d2:
                 pdf_buf = io.BytesIO()
                 rgb = [im.convert("RGB") for im in images]
-                rgb[0].save(pdf_buf, "PDF", save_all=True, append_images=rgb[1:], quality=100)
+                rgb[0].save(pdf_buf, "PDF", save_all=True, append_images=rgb[1:], quality=98)
                 pdf_buf.seek(0)
-                st.download_button("📄 PDF", pdf_buf, "handwritten.pdf", "application/pdf", use_container_width=True)
+                st.download_button("📄 Download PDF", pdf_buf, "handwritten.pdf", 
+                                  "application/pdf", use_container_width=True)
             
             st.balloons()
 
 st.markdown("---")
 st.markdown("""
-<div style="text-align:center; padding:2rem;">
-    <p><b>✍️ ABSOLUTE DARKNESS EDITION v4.0</b></p>
-    <p>🔥 255 ALPHA • 8 LAYERS • ZERO BLUR • 1.3 CONTRAST • RGB(0,0,0)</p>
+<div style="text-align:center; color:#666; padding:2rem;">
+    <p><b>✍️ Perfect Handwriting Pro v5.0</b></p>
+    <p>✨ Optimized for dark, natural, and beautiful handwriting generation</p>
 </div>
 """, unsafe_allow_html=True)
