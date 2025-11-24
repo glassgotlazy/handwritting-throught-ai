@@ -1,24 +1,17 @@
-import os
-import textwrap
-from dotenv import load_dotenv
-import openai
-from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
 from openai import OpenAI
+from PIL import Image, ImageDraw, ImageFont
+import textwrap
 
-# Access key from secrets
-api_key = st.secrets["OPENAI_API_KEY"]
+# Initialize OpenAI client with Streamlit secrets
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Initialize client
-client = OpenAI(api_key=api_key)
-
-# Generate text with OpenAI GPT-4
 def generate_assignment_answer(question: str, pages: int = 2) -> str:
     approx_words_per_page = 180
     target_words = pages * approx_words_per_page
 
     prompt = f"""
-You are an Indian first-year LLB student.
+You are an Indian first-year b tech student.
 Write an exam-style answer to the following question.
 
 Question: {question}
@@ -30,18 +23,16 @@ Constraints:
 - No bullet points, just paragraphs.
 """
 
-response = client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "user", "content": prompt}
-    ],
-    max_tokens=target_words * 4,
-    temperature=0.7
-)
-
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=target_words * 4,
+        temperature=0.7
+    )
     return response.choices[0].message.content.strip()
 
-# Render handwritten text as image
 def render_handwritten_image(
     text: str,
     font_path: str = "fonts/handwriting.ttf",
@@ -75,7 +66,6 @@ def render_handwritten_image(
 
     return image
 
-# Streamlit UI
 st.title("AI Handwritten Assignment Generator ✍️")
 
 question = st.text_area("Enter your assignment question", height=150)
@@ -86,18 +76,19 @@ if st.button("Generate Handwritten Assignment"):
         st.warning("Please enter an assignment question.")
     else:
         with st.spinner("Generating answer with OpenAI GPT-4..."):
-            answer_text = generate_assignment_answer(question, pages)
+            answer_text = generate_assignment_answer(question, int(pages))
 
         with st.spinner("Rendering handwritten image..."):
             img = render_handwritten_image(answer_text)
-
+        
         st.image(img, caption="Generated handwritten assignment page", use_column_width=True)
 
         img.save("assignment_page.png")
         st.success("Rendered page saved as assignment_page.png")
-        st.download_button(
-            label="Download Handwritten Assignment Image",
-            data=open("assignment_page.png", "rb").read(),
-            file_name="assignment_page.png",
-            mime="image/png",
-        )
+        with open("assignment_page.png", "rb") as file:
+            st.download_button(
+                label="Download Handwritten Assignment Image",
+                data=file,
+                file_name="assignment_page.png",
+                mime="image/png",
+            )
